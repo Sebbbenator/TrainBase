@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useExercises } from '@/hooks/useExercises';
+import { usePRs } from '@/hooks/usePRs';
 import { SkeletonList } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
 import type { MuscleGroup } from '@/types';
@@ -61,6 +62,7 @@ const groupIcon: Record<MuscleGroup, LucideIcon> = {
 
 export function ExerciseLibrary() {
   const { exercises, loading, create, remove } = useExercises();
+  const prs = usePRs();
   const [filter, setFilter] = useState<MuscleGroup | 'all'>('all');
   const [showForm, setShowForm] = useState(false);
 
@@ -157,29 +159,41 @@ export function ExerciseLibrary() {
               key={e.id}
               className="card flex items-center justify-between !py-3.5 !px-4"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-royal-500/10 border border-royal-500/30 flex items-center justify-center text-royal-400">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-royal-500/10 border border-royal-500/30 flex items-center justify-center text-royal-400 shrink-0">
                   {(() => {
                     const Icon = groupIcon[e.muscleGroup];
                     return <Icon size={18} strokeWidth={2} />;
                   })()}
                 </div>
-                <div>
-                  <div className="font-medium text-paper">{e.name}</div>
+                <div className="min-w-0">
+                  <div className="font-medium text-paper truncate">{e.name}</div>
                   <div className="text-[11px] uppercase tracking-[0.12em] text-paper-dim mt-0.5">
                     {e.muscleGroup}
                   </div>
                 </div>
               </div>
-              <button
-                className="text-paper-dim hover:text-red-400 transition p-2"
-                onClick={() => {
-                  if (confirm(`Delete "${e.name}"?`)) remove(e.id);
-                }}
-                aria-label="Delete"
-              >
-                <X size={16} strokeWidth={2} />
-              </button>
+              <div className="flex items-center gap-3 shrink-0">
+                {prs.get(e.id) !== undefined && (
+                  <div className="text-right">
+                    <div className="font-display font-bold tabular text-sm text-royal-400 leading-none">
+                      {prs.get(e.id)!.toFixed(1)} kg
+                    </div>
+                    <div className="text-[10px] uppercase tracking-[0.12em] text-paper-dim mt-0.5">
+                      PR
+                    </div>
+                  </div>
+                )}
+                <button
+                  className="text-paper-dim hover:text-red-400 transition p-2"
+                  onClick={() => {
+                    if (confirm(`Delete "${e.name}"?`)) remove(e.id);
+                  }}
+                  aria-label="Delete"
+                >
+                  <X size={16} strokeWidth={2} />
+                </button>
+              </div>
             </li>
           ))}
         </ul>

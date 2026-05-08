@@ -22,12 +22,14 @@ export interface WorkoutSession {
   date: Timestamp;
   notes: string;
   createdAt: Timestamp;
+  muscleGroups?: MuscleGroup[];
 }
 
 export interface WorkoutSet {
   id: string;
   exerciseId: string;
   exerciseName: string;
+  muscleGroup: MuscleGroup;
   setNumber: number;
   reps: number;
   weightKg: number;

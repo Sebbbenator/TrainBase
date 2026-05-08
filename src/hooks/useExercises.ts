@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import {
-  createExercise as createExerciseApi,
-  deleteExercise as deleteExerciseApi,
-  listExercises,
+  createExercise as createApi,
+  deleteExercise as deleteApi,
 } from '@/lib/firestore/exercises';
+import { db } from '@/lib/firebase';
 import type { Exercise, MuscleGroup } from '@/types';
 
 export function useExercises() {
@@ -12,50 +13,37 @@ export function useExercises() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-    listExercises()
-      .then((rows) => {
-        if (!cancelled) setExercises(rows);
-      })
-      .catch((e) => toast.error(e.message ?? 'Failed to load exercises'))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+    setLoading(true);
+    const q = query(collection(db, 'exercises'), orderBy('name'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setExercises(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Exercise, 'id'>) })),
+        );
+        setLoading(false);
+      },
+      (e) => toast.error(e.message ?? 'Failed to load exercises'),
+    );
+    return unsub;
   }, []);
 
   const create = useCallback(async (name: string, muscleGroup: MuscleGroup) => {
-    const optimistic: Exercise = {
-      id: `tmp-${Date.now()}`,
-      name,
-      muscleGroup,
-      // @ts-expect-error optimistic placeholder
-      createdAt: { toDate: () => new Date() },
-    };
-    setExercises((prev) => [...prev, optimistic].sort((a, b) => a.name.localeCompare(b.name)));
     try {
-      const real = await createExerciseApi(name, muscleGroup);
-      setExercises((prev) =>
-        prev.map((e) => (e.id === optimistic.id ? real : e)).sort((a, b) => a.name.localeCompare(b.name)),
-      );
-      return real;
+      return await createApi(name, muscleGroup);
     } catch (e) {
-      setExercises((prev) => prev.filter((x) => x.id !== optimistic.id));
       toast.error((e as Error).message ?? 'Failed to create exercise');
       throw e;
     }
   }, []);
 
   const remove = useCallback(async (id: string) => {
-    const prev = exercises;
-    setExercises((p) => p.filter((e) => e.id !== id));
     try {
-      await deleteExerciseApi(id);
+      await deleteApi(id);
     } catch (e) {
-      setExercises(prev);
       toast.error((e as Error).message ?? 'Failed to delete exercise');
     }
-  }, [exercises]);
+  }, []);
 
   return { exercises, loading, create, remove };
 }

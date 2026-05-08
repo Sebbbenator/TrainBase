@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
-import { Dumbbell, X } from 'lucide-react';
+import { Check, Dumbbell, Pencil, Timer, X } from 'lucide-react';
+import clsx from 'clsx';
 import {
   Area,
   AreaChart,
@@ -16,10 +17,23 @@ import { useAuthStore } from '@/store/auth';
 import { ExercisePicker } from './ExercisePicker';
 import { Skeleton, SkeletonList } from '@/components/Skeleton';
 import { EmptyState } from '@/components/EmptyState';
-import { getSession, deleteSession } from '@/lib/firestore/workoutSessions';
+import { getSession, deleteSession, updateSession } from '@/lib/firestore/workoutSessions';
 import { listSetsByExercise } from '@/lib/firestore/sets';
 import { chartTheme, RoyalAreaGradient } from '@/lib/chartTheme';
+import { Timestamp } from 'firebase/firestore';
 import type { Exercise, WorkoutSession, WorkoutSet } from '@/types';
+
+const REST_PRESETS = [60, 90, 120, 180] as const;
+
+function formatRest(s: number) {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function todayLocalIso(d: Date) {
+  const copy = new Date(d);
+  copy.setMinutes(copy.getMinutes() - copy.getTimezoneOffset());
+  return copy.toISOString().slice(0, 10);
+}
 
 export function SessionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -30,10 +44,21 @@ export function SessionDetail() {
   const [sessionLoading, setSessionLoading] = useState(true);
   const { sets, loading: setsLoading, create, update, remove } = useSets(id);
 
+  // --- set form ---
   const [exercise, setExercise] = useState<Exercise | null>(null);
   const [reps, setReps] = useState('');
   const [weightKg, setWeightKg] = useState('');
   const [rpe, setRpe] = useState('');
+
+  // --- rest timer ---
+  const [restDuration, setRestDuration] = useState(90);
+  const [restRemaining, setRestRemaining] = useState<number | null>(null);
+
+  // --- session editing ---
+  const [editing, setEditing] = useState(false);
+  const [editDate, setEditDate] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!uid || !id) return;
@@ -43,6 +68,26 @@ export function SessionDetail() {
       .catch((e) => toast.error(e.message ?? 'Failed to load session'))
       .finally(() => setSessionLoading(false));
   }, [uid, id]);
+
+  useEffect(() => {
+    if (session) {
+      setEditDate(todayLocalIso(session.date.toDate()));
+      setEditNotes(session.notes);
+    }
+  }, [session]);
+
+  // countdown tick
+  useEffect(() => {
+    if (restRemaining === null || restRemaining <= 0) {
+      if (restRemaining === 0) {
+        toast('Rest done!', { icon: '🔔' });
+        setRestRemaining(null);
+      }
+      return;
+    }
+    const t = setTimeout(() => setRestRemaining((r) => (r !== null ? r - 1 : null)), 1000);
+    return () => clearTimeout(t);
+  }, [restRemaining]);
 
   const groupedSets = useMemo(() => {
     const map = new Map<string, WorkoutSet[]>();
@@ -66,20 +111,41 @@ export function SessionDetail() {
     if (!r || r < 1) return toast.error('Reps must be ≥ 1');
     if (isNaN(w) || w < 0) return toast.error('Weight must be ≥ 0');
     const rpeVal = rpe ? parseFloat(rpe) : null;
-    if (rpeVal !== null && (rpeVal < 1 || rpeVal > 10))
-      return toast.error('RPE 1–10');
+    if (rpeVal !== null && (rpeVal < 1 || rpeVal > 10)) return toast.error('RPE 1–10');
 
-    await create({
-      exerciseId: exercise.id,
-      exerciseName: exercise.name,
-      setNumber: nextSetNumber,
-      reps: r,
-      weightKg: w,
-      rpe: rpeVal,
-    });
-    setReps('');
-    setWeightKg('');
-    setRpe('');
+    try {
+      await create({
+        exerciseId: exercise.id,
+        exerciseName: exercise.name,
+        muscleGroup: exercise.muscleGroup,
+        setNumber: nextSetNumber,
+        reps: r,
+        weightKg: w,
+        rpe: rpeVal,
+      });
+      setReps('');
+      setWeightKg('');
+      setRpe('');
+      setRestRemaining(restDuration);
+    } catch {
+      // error already toasted in hook
+    }
+  };
+
+  const onSaveEdit = async () => {
+    if (!uid || !id || !session) return;
+    setSaving(true);
+    try {
+      const newDate = Timestamp.fromDate(new Date(editDate));
+      await updateSession(uid, id, { date: newDate, notes: editNotes });
+      setSession({ ...session, date: newDate, notes: editNotes });
+      setEditing(false);
+      toast.success('Session updated');
+    } catch (e) {
+      toast.error((e as Error).message ?? 'Failed to update session');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onDeleteSession = async () => {
@@ -106,26 +172,73 @@ export function SessionDetail() {
 
   return (
     <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-start justify-between">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.14em] text-paper-muted font-medium">
-            {format(session.date.toDate(), 'EEEE')}
+        {editing ? (
+          <div className="flex-1 space-y-2 mr-3">
+            <input
+              type="date"
+              className="input"
+              value={editDate}
+              onChange={(e) => setEditDate(e.target.value)}
+            />
+            <input
+              className="input"
+              placeholder="Notes"
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <button
+                className="btn-primary !text-xs !px-3 !py-2 gap-1.5"
+                onClick={onSaveEdit}
+                disabled={saving}
+              >
+                <Check size={13} strokeWidth={2.5} />
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                className="btn-ghost !text-xs !px-3 !py-2"
+                onClick={() => setEditing(false)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-          <h1 className="font-display text-3xl font-bold tracking-tight mt-1">
-            {format(session.date.toDate(), 'MMM d, yyyy')}
-          </h1>
-          {session.notes && (
-            <p className="text-sm text-paper-muted mt-2">{session.notes}</p>
-          )}
-        </div>
-        <button
-          className="text-[11px] uppercase tracking-[0.12em] text-paper-dim hover:text-red-400 transition"
-          onClick={onDeleteSession}
-        >
-          Delete
-        </button>
+        ) : (
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.14em] text-paper-muted font-medium">
+              {format(session.date.toDate(), 'EEEE')}
+            </div>
+            <h1 className="font-display text-3xl font-bold tracking-tight mt-1">
+              {format(session.date.toDate(), 'MMM d, yyyy')}
+            </h1>
+            {session.notes && (
+              <p className="text-sm text-paper-muted mt-2">{session.notes}</p>
+            )}
+          </div>
+        )}
+
+        {!editing && (
+          <div className="flex items-center gap-3">
+            <button
+              className="text-paper-dim hover:text-paper transition p-1"
+              onClick={() => setEditing(true)}
+              aria-label="Edit session"
+            >
+              <Pencil size={15} strokeWidth={2} />
+            </button>
+            <button
+              className="text-[11px] uppercase tracking-[0.12em] text-paper-dim hover:text-red-400 transition"
+              onClick={onDeleteSession}
+            >
+              Delete
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-2 gap-3">
         <div className="card !p-4">
           <div className="font-display text-2xl font-bold tabular tracking-tight">
@@ -145,11 +258,37 @@ export function SessionDetail() {
         </div>
       </div>
 
+      {/* Add set form */}
       <form className="card-hero space-y-3" onSubmit={onAdd}>
-        <div className="text-[11px] uppercase tracking-[0.14em] text-paper-muted font-medium">
-          Add set
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-paper-muted font-medium">
+            Add set
+          </div>
+          {/* Rest duration presets */}
+          <div className="flex items-center gap-1.5">
+            <Timer size={13} className="text-paper-dim" strokeWidth={2} />
+            <div className="flex gap-1">
+              {REST_PRESETS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setRestDuration(s)}
+                  className={clsx(
+                    'text-[10px] px-2 py-1 rounded-lg transition',
+                    restDuration === s
+                      ? 'bg-royal-500/20 text-royal-400 border border-royal-500/40'
+                      : 'text-paper-dim hover:text-paper-muted',
+                  )}
+                >
+                  {s}s
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
+
         <ExercisePicker value={exercise} onChange={setExercise} />
+
         <div className="grid grid-cols-3 gap-2">
           <div>
             <label className="label">Set #</label>
@@ -196,6 +335,31 @@ export function SessionDetail() {
         <button className="btn-primary w-full">+ Add set</button>
       </form>
 
+      {/* Rest timer */}
+      {restRemaining !== null && (
+        <div className="card flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Timer size={18} className="text-royal-400" strokeWidth={2} />
+            <div>
+              <div className="font-display text-2xl font-bold tabular tracking-tight text-royal-400">
+                {formatRest(restRemaining)}
+              </div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-paper-muted mt-0.5">
+                Rest
+              </div>
+            </div>
+          </div>
+          <button
+            className="text-paper-dim hover:text-paper transition p-2"
+            onClick={() => setRestRemaining(null)}
+            aria-label="Dismiss timer"
+          >
+            <X size={16} strokeWidth={2} />
+          </button>
+        </div>
+      )}
+
+      {/* Sets list */}
       {setsLoading ? (
         <SkeletonList rows={2} />
       ) : groupedSets.length === 0 ? (

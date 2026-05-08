@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import {
   deleteWeightLog as deleteApi,
-  listWeightLogs,
   upsertWeightLog as upsertApi,
 } from '@/lib/firestore/weightLogs';
+import { db } from '@/lib/firebase';
 import { useAuthStore } from '@/store/auth';
 import type { WeightLog } from '@/types';
 
@@ -15,50 +16,41 @@ export function useWeightLogs() {
 
   useEffect(() => {
     if (!uid) return;
-    let cancelled = false;
     setLoading(true);
-    listWeightLogs(uid)
-      .then((rows) => !cancelled && setLogs(rows))
-      .catch((e) => toast.error(e.message ?? 'Failed to load weight logs'))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+    const q = query(collection(db, 'users', uid, 'weightLogs'), orderBy('date', 'asc'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setLogs(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WeightLog, 'id'>) })));
+        setLoading(false);
+      },
+      (e) => toast.error(e.message ?? 'Failed to load weight logs'),
+    );
+    return unsub;
   }, [uid]);
 
   const upsert = useCallback(
     async (date: Date, weightKg: number, notes: string) => {
       if (!uid) return;
-      const prev = logs;
       try {
-        const real = await upsertApi(uid, date, weightKg, notes);
-        setLogs((p) => {
-          const next = p.filter((l) => l.id !== real.id);
-          next.push(real);
-          next.sort((a, b) => a.date.toMillis() - b.date.toMillis());
-          return next;
-        });
+        await upsertApi(uid, date, weightKg, notes);
       } catch (e) {
-        setLogs(prev);
         toast.error((e as Error).message ?? 'Failed to save weight');
       }
     },
-    [uid, logs],
+    [uid],
   );
 
   const remove = useCallback(
     async (id: string) => {
       if (!uid) return;
-      const prev = logs;
-      setLogs((p) => p.filter((l) => l.id !== id));
       try {
         await deleteApi(uid, id);
       } catch (e) {
-        setLogs(prev);
         toast.error((e as Error).message ?? 'Failed to delete weight log');
       }
     },
-    [uid, logs],
+    [uid],
   );
 
   return { logs, loading, upsert, remove };

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import {
   createSession as createApi,
   deleteSession as deleteApi,
-  listSessions,
   updateSession as updateApi,
 } from '@/lib/firestore/workoutSessions';
+import { db } from '@/lib/firebase';
 import { useAuthStore } from '@/store/auth';
 import type { WorkoutSession } from '@/types';
 
@@ -16,23 +17,25 @@ export function useWorkoutSessions() {
 
   useEffect(() => {
     if (!uid) return;
-    let cancelled = false;
     setLoading(true);
-    listSessions(uid)
-      .then((rows) => !cancelled && setSessions(rows))
-      .catch((e) => toast.error(e.message ?? 'Failed to load sessions'))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+    const q = query(collection(db, 'users', uid, 'workoutSessions'), orderBy('date', 'desc'));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setSessions(
+          snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<WorkoutSession, 'id'>) })),
+        );
+        setLoading(false);
+      },
+      (e) => toast.error(e.message ?? 'Failed to load sessions'),
+    );
+    return unsub;
   }, [uid]);
 
   const create = useCallback(
     async (date: Date, notes: string) => {
       if (!uid) throw new Error('Not authenticated');
-      const session = await createApi(uid, date, notes);
-      setSessions((prev) => [session, ...prev]);
-      return session;
+      return createApi(uid, date, notes);
     },
     [uid],
   );
@@ -40,31 +43,25 @@ export function useWorkoutSessions() {
   const update = useCallback(
     async (id: string, patch: Partial<Pick<WorkoutSession, 'notes' | 'date'>>) => {
       if (!uid) return;
-      const prev = sessions;
-      setSessions((s) => s.map((x) => (x.id === id ? { ...x, ...patch } : x)));
       try {
         await updateApi(uid, id, patch);
       } catch (e) {
-        setSessions(prev);
-        toast.error((e as Error).message ?? 'Failed to update');
+        toast.error((e as Error).message ?? 'Failed to update session');
       }
     },
-    [uid, sessions],
+    [uid],
   );
 
   const remove = useCallback(
     async (id: string) => {
       if (!uid) return;
-      const prev = sessions;
-      setSessions((s) => s.filter((x) => x.id !== id));
       try {
         await deleteApi(uid, id);
       } catch (e) {
-        setSessions(prev);
         toast.error((e as Error).message ?? 'Failed to delete session');
       }
     },
-    [uid, sessions],
+    [uid],
   );
 
   return { sessions, loading, create, update, remove };

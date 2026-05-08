@@ -42,7 +42,18 @@ export function WorkoutsList() {
     if (groupFilter === 'all' && !exerciseFilter) return grouped;
     const term = exerciseFilter.toLowerCase();
     return grouped
-      .map(([k, arr]) => [k, arr.filter((s) => s.notes.toLowerCase().includes(term))] as const)
+      .map(
+        ([k, arr]) =>
+          [
+            k,
+            arr.filter((s) => {
+              const matchesText = !term || s.notes.toLowerCase().includes(term);
+              const matchesGroup =
+                groupFilter === 'all' || s.muscleGroups?.includes(groupFilter);
+              return matchesText && matchesGroup;
+            }),
+          ] as const,
+      )
       .filter(([, arr]) => arr.length > 0);
   }, [grouped, exerciseFilter, groupFilter]);
 
