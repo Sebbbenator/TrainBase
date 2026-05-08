@@ -6,15 +6,15 @@ import { useWorkoutSessions } from '@/hooks/useWorkoutSessions';
 import { useWeightLogs } from '@/hooks/useWeightLogs';
 import { Skeleton } from '@/components/Skeleton';
 import { Stat } from '@/components/Stat';
-import { formatDateId } from '@/lib/firestore/weightLogs';
 import { RoyalAreaGradient, ROYAL_GRADIENT_ID } from '@/lib/chartTheme';
 
 export function Dashboard() {
   const { sessions, loading: sessionsLoading } = useWorkoutSessions();
   const { logs, loading: logsLoading } = useWeightLogs();
 
-  const todayId = formatDateId(new Date());
-  const todayWeight = logs.find((l) => l.id === todayId);
+  const latestWeight = logs.length > 0
+    ? [...logs].sort((a, b) => b.date.toMillis() - a.date.toMillis())[0]
+    : null;
   const todaySession = sessions.find((s) => isToday(s.date.toDate()));
   const lastSession = sessions[0];
 
@@ -39,30 +39,32 @@ export function Dashboard() {
         </p>
       </div>
 
-      {/* Today's weight hero card */}
+      {/* Current weight hero card */}
       <Link to="/weight" className="block">
         <div className="card-hero relative overflow-hidden">
           <div className="flex items-start justify-between mb-4">
             <span className="text-[11px] uppercase tracking-[0.14em] text-paper-muted font-medium">
-              Today's weight
+              Current weight
             </span>
-            <span className="chip">
-              {todayWeight ? 'Logged' : 'Not logged'}
-            </span>
+            {latestWeight && (
+              <span className="chip">
+                {format(latestWeight.date.toDate(), 'MMM d')}
+              </span>
+            )}
           </div>
 
           {logsLoading ? (
             <Skeleton className="h-16 w-40" />
-          ) : todayWeight ? (
+          ) : latestWeight ? (
             <Stat
-              value={todayWeight.weightKg.toFixed(1)}
+              value={latestWeight.weightKg.toFixed(1)}
               unit="kg"
               size="hero"
             />
           ) : (
             <div>
               <Stat value="—" unit="kg" size="hero" />
-              <p className="text-sm text-paper-muted mt-3">Tap to log today's weight.</p>
+              <p className="text-sm text-paper-muted mt-3">Tap to log your weight.</p>
             </div>
           )}
 
