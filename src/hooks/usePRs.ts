@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import toast from 'react-hot-toast';
 import { listAllSets } from '@/lib/firestore/sets';
 import { useAuthStore } from '@/store/auth';
 
@@ -20,7 +19,7 @@ export function usePRs() {
         }
         setPrs(map);
       })
-      .catch((e) => toast.error(e.message ?? 'Failed to load PRs'));
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
