@@ -52,6 +52,7 @@ export function SessionDetail() {
 
   // --- rest timer ---
   const [restDuration, setRestDuration] = useState(90);
+  const [restEndTime, setRestEndTime] = useState<number | null>(null);
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
 
   // --- session editing ---
@@ -76,18 +77,26 @@ export function SessionDetail() {
     }
   }, [session]);
 
-  // countdown tick
+  // countdown tick — uses wall-clock end time so backgrounding doesn't stall it
   useEffect(() => {
-    if (restRemaining === null || restRemaining <= 0) {
-      if (restRemaining === 0) {
-        toast('Rest done!', { icon: '🔔' });
-        setRestRemaining(null);
-      }
+    if (restEndTime === null) {
+      setRestRemaining(null);
       return;
     }
-    const t = setTimeout(() => setRestRemaining((r) => (r !== null ? r - 1 : null)), 1000);
-    return () => clearTimeout(t);
-  }, [restRemaining]);
+    const tick = () => {
+      const left = Math.round((restEndTime - Date.now()) / 1000);
+      if (left <= 0) {
+        setRestEndTime(null);
+        setRestRemaining(null);
+        toast('Rest done!', { icon: '🔔' });
+      } else {
+        setRestRemaining(left);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [restEndTime]);
 
   const groupedSets = useMemo(() => {
     const map = new Map<string, WorkoutSet[]>();
@@ -126,7 +135,7 @@ export function SessionDetail() {
       setReps('');
       setWeightKg('');
       setRpe('');
-      setRestRemaining(restDuration);
+      setRestEndTime(Date.now() + restDuration * 1000);
     } catch {
       // error already toasted in hook
     }
@@ -351,7 +360,7 @@ export function SessionDetail() {
           </div>
           <button
             className="text-paper-dim hover:text-paper transition p-2"
-            onClick={() => setRestRemaining(null)}
+            onClick={() => setRestEndTime(null)}
             aria-label="Dismiss timer"
           >
             <X size={16} strokeWidth={2} />
